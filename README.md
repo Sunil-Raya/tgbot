@@ -169,7 +169,20 @@ so the loop never stops. Captions are limited to 1024 characters by Telegram.
 
 ---
 
-## 7. Database schema
+## 7. Code graph (graphify)
+
+`graphify-out/` contains a knowledge graph of this codebase made with
+[graphify](https://graphify.com) (`pip install graphifyy`):
+
+- `graphify-out/graph.html` — interactive graph, open it in a browser
+- `graphify-out/GRAPH_REPORT.md` — core abstractions, clusters, cross-module links
+- `graphify-out/graph.json` — raw graph (use with `graphify path "A" "B"` / `graphify explain "X"`)
+
+Rebuild after code changes (no API key needed): `graphify update .`
+
+---
+
+## 7b. Database schema
 
 ```sql
 users(user_id PK, first_name, username, source, started_at, completed, completed_at,
