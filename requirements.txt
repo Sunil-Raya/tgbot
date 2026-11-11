@@ -1,0 +1,7 @@
+# Kurigram is a maintained, drop-in fork of Pyrogram (you still `import pyrogram`).
+# The original pyrogram==2.0.106 is unmaintained and fails with "Peer id invalid"
+# on channels created in recent years, so it is not recommended.
+kurigram==2.2.27
+tgcrypto==1.2.5
+aiosqlite==0.22.1
+python-dotenv==1.2.4
