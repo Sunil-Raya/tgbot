@@ -1,5 +1,6 @@
 """Background loop: every N seconds delete the previous promo message in the
 private channel and post a fresh one with the "Share" deep-link button.
+The post can carry a photo, video or GIF (text becomes its caption).
 
 Design notes
 ------------
@@ -24,6 +25,7 @@ from pyrogram.errors import FloodWait, RPCError
 
 from . import texts
 from .context import BotContext, Keys
+from .media import CAPTION_LIMIT, MEDIA_TYPES, send_media
 
 log = logging.getLogger(__name__)
 
@@ -107,17 +109,75 @@ class ChannelLoop:
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(self._wake.wait(), timeout=max(0.0, deadline - loop.time()))
 
+    async def media(self) -> tuple[str, str, str | None] | None:
+        """The media to attach: (type, file_id/path/url, env_source_to_cache).
+
+        Priority: media set with /loopmedia  >  LOOP_MEDIA from .env  >  none.
+        ``/loopmedia none`` stores type "none" = text only, even if .env has media.
+        """
+        db, cfg = self.ctx.db, self.ctx.config
+        media_type = await db.get_setting(Keys.LOOP_MEDIA_TYPE)
+        if media_type == "none":
+            return None
+        if media_type in MEDIA_TYPES:
+            file_id = await db.get_setting(Keys.LOOP_MEDIA_FILE_ID)
+            if file_id:
+                return media_type, file_id, None
+        if cfg.loop_media and cfg.loop_media_type:
+            # Re-use the file_id from the first upload instead of uploading
+            # the same file every minute.
+            cached = await db.get_setting(Keys.LOOP_MEDIA_CACHE, "")
+            source, _, file_id = cached.partition("\n")
+            if source == cfg.loop_media and file_id:
+                return cfg.loop_media_type, file_id, None
+            return cfg.loop_media_type, cfg.loop_media, cfg.loop_media
+        return None
+
     async def tick(self) -> None:
         """Delete the previous loop message, then post a new one."""
         await self.delete_previous()
-        message = await self.client.send_message(
-            self.ctx.config.private_channel_id,
-            await self.text(),
+        message = await self._post()
+        await self.ctx.db.set_setting(Keys.LOOP_LAST_MESSAGE_ID, message.id)
+        log.debug("Posted loop message %s", message.id)
+
+    async def _post(self):
+        chat_id = self.ctx.config.private_channel_id
+        text = await self.text()
+        common = dict(
             reply_markup=texts.share_keyboard(self.ctx.quest_deep_link),
             disable_notification=True,
         )
-        await self.ctx.db.set_setting(Keys.LOOP_LAST_MESSAGE_ID, message.id)
-        log.debug("Posted loop message %s", message.id)
+        media = await self.media()
+        if media is not None:
+            media_type, file, cache_source = media
+            try:
+                message = await send_media(
+                    self.client, chat_id, media_type, file,
+                    caption=text[:CAPTION_LIMIT], **common,
+                )
+            except FloodWait:
+                raise
+            except (RPCError, OSError, ValueError) as exc:
+                # Broken file id / unreachable URL / missing file: don't stop
+                # the loop, fall back to a text post and tell the admins.
+                log.error("Loop media (%s) failed, posting text only: %s", media_type, exc)
+                await self.ctx.db.set_setting(Keys.LOOP_MEDIA_CACHE, None)
+                await self.ctx.notify_admins(
+                    self.client,
+                    f"⚠️ The loop {media_type} could not be sent, posting text only:\n"
+                    f"<code>{type(exc).__name__}: {exc}</code>\n"
+                    "Set a new one with /loopmedia (reply to a photo/video/GIF).",
+                    dedupe_key="loop-media-failed",
+                )
+            else:
+                if cache_source is not None:
+                    sent = getattr(message, media_type, None)
+                    if sent is not None:
+                        await self.ctx.db.set_setting(
+                            Keys.LOOP_MEDIA_CACHE, f"{cache_source}\n{sent.file_id}"
+                        )
+                return message
+        return await self.client.send_message(chat_id, text, **common)
 
     async def delete_previous(self) -> None:
         last_id = await self.ctx.db.get_int(Keys.LOOP_LAST_MESSAGE_ID, None)

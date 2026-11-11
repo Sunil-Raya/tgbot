@@ -26,6 +26,7 @@ from .. import texts
 from ..checks import run_checks
 from ..context import BotContext, Keys
 from ..database import UserRow
+from ..media import CAPTION_LIMIT, extract_media
 from ..rewards import revoke_link
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,8 @@ ADMIN_HELP = """🛠 <b>Admin panel</b>
 /loop on|off|now|status — control the promo loop
 /interval &lt;seconds&gt; — change the loop interval (min 10)
 /looptext &lt;text&gt; | reset — change the loop message text
+/loopmedia — reply to a photo/video/GIF to attach it to the loop message
+/loopmedia none | reset — text only | back to the .env default
 
 <b>Other</b>
 /announce on|off — toggle public unlock announcements
@@ -55,7 +58,7 @@ ADMIN_HELP = """🛠 <b>Admin panel</b>
 
 ADMIN_COMMANDS = [
     "admin", "panel", "stats", "check", "user", "export", "reset", "ban", "unban",
-    "loop", "interval", "looptext", "announce", "broadcast",
+    "loop", "interval", "looptext", "loopmedia", "announce", "broadcast",
 ]
 
 
@@ -228,6 +231,7 @@ def register(app: Client, ctx: BotContext) -> None:
                 f"Task running: {'yes' if loop.running else 'NO ⚠️'}\n"
                 f"Interval: {await loop.interval()}s\n"
                 f"Last message id: {last}\n"
+                f"Media: {await _media_label(loop)}\n"
                 f"Text: {escape(await loop.text())}"
             )
 
@@ -255,7 +259,43 @@ def register(app: Client, ctx: BotContext) -> None:
             await m.reply_text("Loop text reset to default.")
         else:
             await db.set_setting(Keys.LOOP_TEXT, text)
-            await m.reply_text("✏️ Loop text updated. It will be used from the next post.")
+            warn = (
+                f"\n⚠️ It is longer than {CAPTION_LIMIT} characters, so it will be cut "
+                "when a photo/video is attached."
+                if len(text) > CAPTION_LIMIT else ""
+            )
+            await m.reply_text(f"✏️ Loop text updated. It will be used from the next post.{warn}")
+
+    async def loopmedia(_: Client, m: Message) -> None:
+        sub = m.command[1].lower() if len(m.command) > 1 else ""
+        found = extract_media(m.reply_to_message)
+        if found:
+            media_type, file_id = found
+            await db.set_setting(Keys.LOOP_MEDIA_FILE_ID, file_id)
+            await db.set_setting(Keys.LOOP_MEDIA_TYPE, media_type)
+            note = "Posting it now." if ctx.loop and await ctx.loop.enabled() else "Loop is off — /loop on to start."
+            if ctx.loop:
+                ctx.loop.poke()
+            await m.reply_text(f"🖼 Loop {media_type} set. {note}")
+        elif sub == "none":
+            await db.set_setting(Keys.LOOP_MEDIA_TYPE, "none")
+            await db.set_setting(Keys.LOOP_MEDIA_FILE_ID, None)
+            await m.reply_text("📝 Loop message is now text only.")
+        elif sub == "reset":
+            await db.set_setting(Keys.LOOP_MEDIA_TYPE, None)
+            await db.set_setting(Keys.LOOP_MEDIA_FILE_ID, None)
+            await m.reply_text(
+                "↩️ Loop media reset to the .env default "
+                f"({escape(cfg.loop_media_type or 'none')})."
+            )
+        else:
+            current = await _media_label(ctx.loop) if ctx.loop else "—"
+            await m.reply_text(
+                f"Current loop media: {current}\n\n"
+                "• Send a photo, video or GIF to me, then <b>reply</b> to it with /loopmedia\n"
+                "• /loopmedia none — text only\n"
+                "• /loopmedia reset — use LOOP_MEDIA from .env"
+            )
 
     async def announce(_: Client, m: Message) -> None:
         sub = m.command[1].lower() if len(m.command) > 1 else ""
@@ -315,6 +355,7 @@ def register(app: Client, ctx: BotContext) -> None:
         (loop_cmd, "loop"),
         (interval, "interval"),
         (looptext, "looptext"),
+        (loopmedia, "loopmedia"),
         (announce, "announce"),
         (broadcast, "broadcast"),
     ]
@@ -327,6 +368,15 @@ def register(app: Client, ctx: BotContext) -> None:
         MessageHandler(refuse, filters.command(ADMIN_COMMANDS) & filters.private & ~is_admin)
     )
     app.add_handler(CallbackQueryHandler(refuse_cb, filters.regex(r"^bc:") & ~is_admin))
+
+
+async def _media_label(loop) -> str:
+    media = await loop.media()
+    if media is None:
+        return "none (text only)"
+    media_type, _, _ = media
+    source = "set via /loopmedia" if await loop.ctx.db.get_setting(Keys.LOOP_MEDIA_FILE_ID) else "from .env"
+    return f"{media_type} ({source})"
 
 
 async def _run_broadcast(

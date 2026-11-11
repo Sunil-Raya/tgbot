@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 import pytest_asyncio
 from pyrogram.enums import ChatMemberStatus
-from pyrogram.errors import ChatAdminRequired, UserNotParticipant
+from pyrogram.errors import ChatAdminRequired, MediaInvalid, UserNotParticipant
 
 from funnel_bot.config import Config, RequiredChannel
 from funnel_bot.context import BotContext
@@ -38,6 +38,8 @@ def make_config(tmp_path: Path, **overrides) -> Config:
         loop_interval_seconds=60,
         loop_enabled_default=True,
         loop_text="Share to 3 groups to unlock the channel for everyone!",
+        loop_media=None,
+        loop_media_type=None,
         verify_cooldown_seconds=0,
         welcome_dm_on_join=True,
         announce_enabled_default=True,
@@ -57,6 +59,7 @@ class FakeClient:
         self.deleted: list[tuple[int, int]] = []
         self.links_created: list[str] = []
         self.links_revoked: list[str] = []
+        self.bad_media: set[str] = set()
         self._ids = itertools.count(100)
 
     def join(self, chat_id: int, user_id: int) -> None:
@@ -81,6 +84,26 @@ class FakeClient:
         msg = SimpleNamespace(id=next(self._ids), chat_id=chat_id, text=text, kwargs=kwargs)
         self.sent.append(msg)
         return msg
+
+    async def _send_media(self, media_type, chat_id, media, **kwargs):
+        if media in self.bad_media:
+            raise MediaInvalid()
+        msg = SimpleNamespace(
+            id=next(self._ids), chat_id=chat_id, text=None, media_type=media_type,
+            media=media, caption=kwargs.pop("caption", None), kwargs=kwargs,
+        )
+        setattr(msg, media_type, SimpleNamespace(file_id=f"FILEID-{media_type}-{msg.id}"))
+        self.sent.append(msg)
+        return msg
+
+    async def send_photo(self, chat_id, photo, **kw):
+        return await self._send_media("photo", chat_id, photo, **kw)
+
+    async def send_video(self, chat_id, video, **kw):
+        return await self._send_media("video", chat_id, video, **kw)
+
+    async def send_animation(self, chat_id, animation, **kw):
+        return await self._send_media("animation", chat_id, animation, **kw)
 
     async def delete_messages(self, chat_id, message_ids):
         self.deleted.append((chat_id, message_ids))

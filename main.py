@@ -37,6 +37,7 @@ ADMIN_COMMANDS = USER_COMMANDS + [
     BotCommand("loop", "Control the channel loop"),
     BotCommand("interval", "Set loop interval"),
     BotCommand("looptext", "Set loop text"),
+    BotCommand("loopmedia", "Set loop photo/video/GIF"),
     BotCommand("announce", "Toggle announcements"),
     BotCommand("broadcast", "Broadcast (reply to a message)"),
 ]

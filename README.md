@@ -3,7 +3,7 @@
 A Pyrogram + SQLite bot that:
 
 1. **Auto-approves** every join request to your private channel.
-2. **Posts a promo message every 1 minute** in that channel ("Share to 3 groups to unlock the channel for everyone!" + a **Share** button), **deleting the previous one first** so the channel never fills with spam.
+2. **Posts a promo message every 1 minute** in that channel ("Share to 3 groups to unlock the channel for everyone!" + a **Share** button), optionally with a **photo, video or GIF** of your choice, **deleting the previous one first** so the channel never fills with spam.
 3. The **Share** button deep-links to the bot (`t.me/<YourBot>?start=quest`), where the user gets a **quest**: join 2 secondary channels + 1 main channel, then tap **✅ Verify**.
 4. **Verify** checks the database and then the Telegram API (`get_chat_member`) for all 3 channels, and sends the user an **invite link** to the private channel.
 5. Right after a user unlocks it, the bot posts **"🎉 User [First Name] just unlocked the private channel!"** in the main/announcement channel.
@@ -72,7 +72,9 @@ cp .env.example .env
 | `PERMANENT_INVITE_LINK` | optional | Link used in `permanent` mode (auto-created if empty) |
 | `LOOP_INTERVAL_SECONDS` | optional | Default `60`, minimum `10` |
 | `LOOP_ENABLED` | optional | Default `true` |
-| `LOOP_TEXT` | optional | Default "Share to 3 groups to unlock the channel for everyone!" |
+| `LOOP_TEXT` | optional | Default "Share to 3 groups to unlock the channel for everyone!" (used as the caption when media is attached) |
+| `LOOP_MEDIA` | optional | Photo/video/GIF for the loop message: local path, https URL or Telegram file_id |
+| `LOOP_MEDIA_TYPE` | optional | `photo`, `video` or `animation` (GIF). Guessed from the file extension; required for a file_id |
 | `VERIFY_COOLDOWN_SECONDS` | optional | Anti-spam cooldown on the Verify button (default `5`) |
 | `WELCOME_DM_ON_JOIN` | optional | DM approved joiners a "Start quest" button (default `true`) |
 | `ANNOUNCE_ENABLED` | optional | Default `true` |
@@ -125,6 +127,8 @@ pytest
 | `/loop on\|off\|now\|status` | Control the 1-minute loop (`off` also deletes the current loop message) |
 | `/interval <seconds>` | Change the loop interval live (10–86400) |
 | `/looptext <text>` / `/looptext reset` | Change the loop message text live |
+| `/loopmedia` (as a reply) | Send the bot a photo, video or GIF, reply to it with `/loopmedia` → it's attached to the loop message from now on (posted immediately) |
+| `/loopmedia none` / `/loopmedia reset` | Text only / go back to `LOOP_MEDIA` from `.env` |
 | `/announce on\|off` | Toggle the public unlock announcements |
 | `/broadcast` | Reply to any message with it → confirm → copied to every bot user (flood-safe; blocked users are tracked) |
 
@@ -150,6 +154,21 @@ Admins also get the admin command menu in Telegram's "/" list automatically.
 
 ---
 
+### Changing the loop image / video
+
+Easiest way, no restart needed:
+
+1. Open the bot in DM (as an admin) and send it the photo, video or GIF you want.
+2. Reply to that message with `/loopmedia`.
+3. The channel immediately gets the new post (old one deleted), and every following post uses it.
+
+Priority: media set with `/loopmedia` → `LOOP_MEDIA` from `.env` → text only. A local file from `.env`
+is uploaded once and then re-sent by its Telegram file_id, so it isn't re-uploaded every minute.
+If the media can't be sent (deleted file, broken URL), the bot posts the text instead and alerts admins,
+so the loop never stops. Captions are limited to 1024 characters by Telegram.
+
+---
+
 ## 7. Database schema
 
 ```sql
@@ -158,7 +177,8 @@ users(user_id PK, first_name, username, source, started_at, completed, completed
       created_at, updated_at)
 join_requests(id PK, user_id, chat_id, requested_at, approved, error)
 settings(key PK, value)   -- loop_enabled, loop_interval, loop_text,
-                          -- loop_last_message_id, announce_enabled, permanent_invite_link
+                          -- loop_last_message_id, loop_media_type, loop_media_file_id,
+                          -- loop_media_cache, announce_enabled, permanent_invite_link
 ```
 
 ---

@@ -25,6 +25,9 @@ class Keys:
     LOOP_INTERVAL = "loop_interval"
     LOOP_TEXT = "loop_text"
     LOOP_LAST_MESSAGE_ID = "loop_last_message_id"
+    LOOP_MEDIA_TYPE = "loop_media_type"        # photo/video/animation, or "none"
+    LOOP_MEDIA_FILE_ID = "loop_media_file_id"  # set via /loopmedia
+    LOOP_MEDIA_CACHE = "loop_media_cache"      # "<.env source>\n<file_id>" after 1st upload
     ANNOUNCE_ENABLED = "announce_enabled"
     PERMANENT_LINK = "permanent_invite_link"
 

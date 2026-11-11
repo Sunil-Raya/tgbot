@@ -48,6 +48,8 @@ class Config:
     loop_interval_seconds: int
     loop_enabled_default: bool
     loop_text: str
+    loop_media: str | None                # file path, URL or Telegram file_id
+    loop_media_type: str | None           # "photo", "video" or "animation"
 
     verify_cooldown_seconds: int
     welcome_dm_on_join: bool
@@ -134,6 +136,25 @@ def _required_channel(prefix: str, key: str, default_title: str) -> RequiredChan
     )
 
 
+def _loop_media() -> tuple[str | None, str | None]:
+    from .media import MEDIA_TYPES, guess_type
+
+    source = _opt("LOOP_MEDIA") or None
+    if source is None:
+        return None, None
+    media_type = _opt("LOOP_MEDIA_TYPE").lower() or guess_type(source)
+    if media_type not in MEDIA_TYPES:
+        raise ConfigError(
+            "LOOP_MEDIA_TYPE must be photo, video or animation "
+            "(could not guess it from LOOP_MEDIA)"
+        )
+    is_url = source.startswith(("http://", "https://"))
+    looks_like_path = "/" in source or "\\" in source or guess_type(source) is not None
+    if not is_url and looks_like_path and not Path(source).is_file():
+        raise ConfigError(f"LOOP_MEDIA file not found: {source}")
+    return source, media_type
+
+
 def load_config() -> Config:
     """Read and validate all settings. Raises ``ConfigError`` on problems."""
     required = (
@@ -160,6 +181,8 @@ def load_config() -> Config:
     if interval < 10:
         raise ConfigError("LOOP_INTERVAL_SECONDS must be at least 10 (flood protection)")
 
+    loop_media, loop_media_type = _loop_media()
+
     return Config(
         api_id=_int("API_ID"),
         api_hash=_req("API_HASH"),
@@ -175,6 +198,8 @@ def load_config() -> Config:
         loop_text=_opt(
             "LOOP_TEXT", "Share to 3 groups to unlock the channel for everyone!"
         ),
+        loop_media=loop_media,
+        loop_media_type=loop_media_type,
         verify_cooldown_seconds=_int("VERIFY_COOLDOWN_SECONDS", 5),
         welcome_dm_on_join=_bool("WELCOME_DM_ON_JOIN", True),
         announce_enabled_default=_bool("ANNOUNCE_ENABLED", True),
